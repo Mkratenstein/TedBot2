@@ -1,0 +1,4 @@
+     discord.py
+     atproto
+     python-dotenv
+     requests
