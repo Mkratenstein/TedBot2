@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Load environment variables from the .env file in the same directory as the script
-load_dotenv(os.path.join(SCRIPT_DIR, 'TedBot.env'))
+load_dotenv()  # This will still work locally with .env file
 
 print("Environment variables loaded:", os.getenv('DISCORD_CHANNEL_ID'))
 
