@@ -47,7 +47,7 @@ bluesky.login(BLUESKY_EMAIL, BLUESKY_PASSWORD)
 class SocialMediaBot:
     def __init__(self):
         # self.twitter_accounts = ['example_twitter']  # Commented out
-        self.bluesky_accounts = ['aatgoosepod.bsky.social', 'goose-band.bsky.social']
+        self.bluesky_accounts = [ 'goose-band.bsky.social']
         # self.instagram_accounts = ['example_instagram']  # Commented out
         # self.last_tweet_ids = {}  # Commented out
         self.last_bluesky_posts = {}
