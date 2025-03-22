@@ -46,7 +46,8 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "bot_config.json")
 
 class SocialMediaBot:
     def __init__(self):
-        self.bluesky_accounts = ['aatgoosepod.bsky.social', 'goose-band.bsky.social']
+        #self.bluesky_accounts = ['aatgoosepod.bsky.social', 'goose-band.bsky.social']
+        self.bluesky_accounts = ['goose-band.bsky.social']
         self.last_bluesky_posts = {}
         
         # YouTube settings
