@@ -3,3 +3,4 @@
      python-dotenv
      requests
      google-api-python-client
+     instagrapi
