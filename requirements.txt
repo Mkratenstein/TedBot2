@@ -4,3 +4,4 @@
      requests
      google-api-python-client
      instagrapi
+     Pillow>=8.1.1
