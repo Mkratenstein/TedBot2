@@ -43,17 +43,35 @@ class GooseBandTracker(commands.Bot):
         self.goose_insta_username = 'goosetheband'
 
     async def setup_instagram_client(self):
-        """
-        Set up Instagram client with login and error handling
-        """
-        try:
-            self.insta_client = Client()
+    """
+    Set up Instagram client with login and 2FA handling
+    """
+    try:
+        self.insta_client = Client()
+        two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
+        
+        if two_factor_code:
+            # Attempt login with 2FA code
+            try:
+                self.insta_client.login(
+                    username=self.insta_username, 
+                    password=self.insta_password,
+                    verification_code=two_factor_code
+                )
+                logger.info("Instagram client logged in successfully with 2FA")
+            except Exception as e:
+                logger.error(f"2FA Login failed: {e}")
+                # Fallback to standard login if 2FA fails
+                self.insta_client.login(self.insta_username, self.insta_password)
+        else:
+            # Standard login without 2FA
             self.insta_client.login(self.insta_username, self.insta_password)
-            logger.info("Instagram client logged in successfully")
-        except LoginRequired:
-            logger.error("Instagram login failed. Check credentials.")
-        except Exception as e:
-            logger.error(f"Error setting up Instagram client: {e}")
+        
+        logger.info("Instagram client logged in successfully")
+    except LoginRequired:
+        logger.error("Instagram login failed. Check credentials and 2FA.")
+    except Exception as e:
+        logger.error(f"Error setting up Instagram client: {e}")
 
     async def on_ready(self):
         logger.info(f'Logged in as {self.user.name}')
