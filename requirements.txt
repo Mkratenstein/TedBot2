@@ -1,7 +1,4 @@
-     discord.py
-     atproto
-     python-dotenv
-     requests
-     google-api-python-client
-     instagrapi
-     Pillow>=8.1.1
+discord.py==2.3.2
+google-api-python-client==2.97.0
+python-dotenv==1.0.0
+aiohttp==3.9.3
