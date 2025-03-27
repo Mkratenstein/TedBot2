@@ -79,17 +79,24 @@ class GooseBandTracker(commands.Bot):
                 channelId=self.youtube_channel_id,
                 type='video',
                 order='date',
-                maxResults=1
+                maxResults=5  # Increased to catch potential shorts
             )
             response = request.execute()
             
-            if response['items']:
-                video = response['items'][0]
+            for video in response['items']:
                 video_id = video['id']['videoId']
                 video_title = video['snippet']['title']
                 published_at = datetime.fromisoformat(video['snippet']['publishedAt'].replace('Z', '+00:00'))
                 
-                if video_id != self.last_video and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                # Check if it's a short by URL pattern
+                is_short = '/shorts/' in video_title.lower()
+                
+                if is_short and video_id != self.last_short and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                    channel = self.get_channel(self.discord_channel_id)
+                    await channel.send(f"📱 New Short: {video_title}\n"
+                                       f"https://www.youtube.com/shorts/{video_id}")
+                    self.last_short = video_id
+                elif not is_short and video_id != self.last_video and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
                     channel = self.get_channel(self.discord_channel_id)
                     await channel.send(f"🎵 New Video: {video_title}\n"
                                        f"https://www.youtube.com/watch?v={video_id}")
@@ -98,30 +105,8 @@ class GooseBandTracker(commands.Bot):
             logger.error(f"Error checking videos: {e}")
 
     async def check_shorts(self):
-        try:
-            request = self.youtube.search().list(
-                part='snippet',
-                channelId=self.youtube_channel_id,
-                type='video',
-                videoCategoryId='shorts',
-                order='date',
-                maxResults=1
-            )
-            response = request.execute()
-            
-            if response['items']:
-                short = response['items'][0]
-                short_id = short['id']['videoId']
-                short_title = short['snippet']['title']
-                published_at = datetime.fromisoformat(short['snippet']['publishedAt'].replace('Z', '+00:00'))
-                
-                if short_id != self.last_short and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
-                    channel = self.get_channel(self.discord_channel_id)
-                    await channel.send(f"📱 New Short: {short_title}\n"
-                                       f"https://www.youtube.com/shorts/{short_id}")
-                    self.last_short = short_id
-        except Exception as e:
-            logger.error(f"Error checking shorts: {e}")
+        # This method is now deprecated - functionality moved to check_videos()
+        pass
 
 def main():
     intents = discord.Intents.default()
