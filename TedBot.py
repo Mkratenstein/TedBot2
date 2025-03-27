@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 from datetime import datetime, timedelta
+import sys
 
 import discord
 from discord.ext import commands, tasks
@@ -22,6 +23,20 @@ class GooseBandTracker(commands.Bot):
     def __init__(self, intents):
         super().__init__(command_prefix='!', intents=intents)
         
+        # Validate required environment variables
+        required_vars = [
+            'YOUTUBE_API_KEY',
+            'INSTAGRAM_USERNAME',
+            'INSTAGRAM_PASSWORD',
+            'DISCORD_TOKEN',
+            'YOUTUBE_CHANNEL_ID',
+            'DISCORD_CHANNEL_ID'
+        ]
+        
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
         # YouTube API setup
         self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
         
@@ -41,50 +56,84 @@ class GooseBandTracker(commands.Bot):
         self.youtube_channel_id = os.getenv('YOUTUBE_CHANNEL_ID')
         self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))
         self.goose_insta_username = 'goosetheband'
+        
+        # Task tracking
+        self.active_tasks = set()
 
     async def setup_instagram_client(self):
         """Set up Instagram client with login and 2FA handling"""
-    try:
-        self.insta_client = Client()
-        two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
-        
-        if two_factor_code:
-            try:
-                self.insta_client.login(
-                    username=self.insta_username, 
-                    password=self.insta_password,
-                    verification_code=two_factor_code
-                )
-                logger.info("Instagram client logged in successfully with 2FA")
-            except Exception as e:
-                logger.error(f"2FA Login failed: {e}")
+        try:
+            self.insta_client = Client()
+            two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
+            
+            if two_factor_code:
+                try:
+                    self.insta_client.login(
+                        username=self.insta_username, 
+                        password=self.insta_password,
+                        verification_code=two_factor_code
+                    )
+                    logger.info("Instagram client logged in successfully with 2FA")
+                except Exception as e:
+                    logger.error(f"2FA Login failed: {e}")
+                    try:
+                        self.insta_client.login(self.insta_username, self.insta_password)
+                        logger.info("Fallback to standard login successful")
+                    except Exception as standard_login_error:
+                        logger.error(f"Standard login failed: {standard_login_error}")
+                        return
+            else:
                 try:
                     self.insta_client.login(self.insta_username, self.insta_password)
-                    logger.info("Fallback to standard login successful")
-                except Exception as standard_login_error:
-                    logger.error(f"Standard login failed: {standard_login_error}")
+                    logger.info("Instagram client logged in successfully")
+                except Exception as e:
+                    logger.error(f"Standard login failed: {e}")
                     return
-        else:
-            try:
-                self.insta_client.login(self.insta_username, self.insta_password)
-                logger.info("Instagram client logged in successfully")
-            except Exception as e:
-                logger.error(f"Standard login failed: {e}")
-                return
-    except Exception as e:
-        logger.error(f"Unexpected error setting up Instagram client: {e}")
-        self.insta_client = None
-
+        except Exception as e:
+            logger.error(f"Unexpected error setting up Instagram client: {e}")
+            self.insta_client = None
 
     async def on_ready(self):
         logger.info(f'Logged in as {self.user.name}')
         await self.setup_instagram_client()
+        
+        # Start background tasks
         self.check_youtube_updates.start()
         self.check_instagram_updates.start()
+        
+        # Add tasks to active tasks set
+        self.active_tasks.add(self.check_youtube_updates)
+        self.active_tasks.add(self.check_instagram_updates)
+
+    async def close(self):
+        """Gracefully shut down the bot and cancel all tasks"""
+        logger.info("Shutting down bot...")
+        
+        # Cancel all active tasks
+        for task in self.active_tasks:
+            if task.is_running():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # Close Instagram client if it exists
+        if self.insta_client:
+            try:
+                self.insta_client.logout()
+            except Exception as e:
+                logger.error(f"Error logging out of Instagram: {e}")
+        
+        # Call parent class close method
+        await super().close()
+        logger.info("Bot shutdown complete")
 
     def cog_unload(self):
-        self.check_youtube_updates.cancel()
-        self.check_instagram_updates.cancel()
+        """Cancel all tasks when cog is unloaded"""
+        for task in self.active_tasks:
+            if task.is_running():
+                task.cancel()
 
     @tasks.loop(minutes=15)
     async def check_instagram_updates(self):
@@ -166,16 +215,33 @@ class GooseBandTracker(commands.Bot):
     # Existing YouTube methods remain the same as in previous implementation...
 
 def main():
-    intents = discord.Intents.default()
-    intents.message_content = True
-    
-    bot = GooseBandTracker(intents)
-    
-    @bot.command()
-    async def ping(ctx):
-        await ctx.send('Pong! Goose Band Tracker is alive!')
-
-    bot.run(os.getenv('DISCORD_TOKEN'))
+    try:
+        intents = discord.Intents.default()
+        intents.message_content = True
+        
+        bot = GooseBandTracker(intents)
+        
+        @bot.command()
+        async def ping(ctx):
+            await ctx.send('Pong! Goose Band Tracker is alive!')
+        
+        @bot.command()
+        async def status(ctx):
+            """Check the status of the bot and its services"""
+            status_message = "🟢 Bot Status:\n"
+            status_message += f"- Discord: Connected as {bot.user.name}\n"
+            status_message += f"- Instagram: {'Connected' if bot.insta_client else 'Disconnected'}\n"
+            status_message += f"- YouTube: {'Connected' if bot.youtube else 'Disconnected'}\n"
+            await ctx.send(status_message)
+        
+        # Run the bot with error handling
+        bot.run(os.getenv('DISCORD_TOKEN'))
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
