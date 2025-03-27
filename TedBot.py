@@ -151,55 +151,66 @@ class GooseBandTracker(commands.Bot):
                 try:
                     # Try standard login first
                     logger.info(f"Attempting standard login (attempt {attempt + 1}/{max_retries})...")
-                    
-                    # Check if we need 2FA before attempting login
-                    if not self.pending_2fa:
-                        channel = self.get_channel(self.discord_channel_id)
-                        message = await channel.send("🔐 Instagram 2FA Required!\n"
-                                                   "Please use the command `!2fa <code>` to provide the 2FA code.")
-                        self.twofa_message_id = message.id
-                        self.pending_2fa = True
-                        
-                        # Wait for 2FA code with timeout
-                        try:
-                            await asyncio.wait_for(self.wait_for_2fa(), timeout=300)  # 5 minute timeout
-                        except asyncio.TimeoutError:
-                            logger.error("Timeout waiting for 2FA code")
-                            # Try to delete the message on timeout
-                            try:
-                                message = await channel.fetch_message(self.twofa_message_id)
-                                await message.delete()
-                            except Exception as e:
-                                logger.error(f"Error deleting 2FA message on timeout: {e}")
-                            self.insta_client = None
-                            return
-                    
-                    # Attempt login with 2FA code
-                    if self.two_factor_code:
-                        logger.info("Attempting login with 2FA...")
-                        await loop.run_in_executor(None,
-                            lambda: self.insta_client.login(
-                                username=self.insta_username,
-                                password=self.insta_password,
-                                verification_code=self.two_factor_code
-                            )
-                        )
-                        logger.info("Instagram client logged in successfully with 2FA")
-                        self.two_factor_code = None
-                        return
-                    else:
-                        # If no 2FA code yet, try standard login
-                        await loop.run_in_executor(None,
-                            self.insta_client.login,
-                            self.insta_username,
-                            self.insta_password
-                        )
-                        logger.info("Instagram client logged in successfully")
-                        return
-                        
+                    await loop.run_in_executor(None,
+                        self.insta_client.login,
+                        self.insta_username,
+                        self.insta_password
+                    )
+                    logger.info("Instagram client logged in successfully")
+                    return
                 except Exception as e:
                     error_msg = str(e)
                     logger.warning(f"Login attempt {attempt + 1} failed: {error_msg}")
+                    
+                    # Check if we're getting a 2FA challenge
+                    if "challenge" in error_msg.lower() or "verification" in error_msg.lower():
+                        logger.info("Detected 2FA challenge")
+                        if not self.pending_2fa:
+                            self.pending_2fa = True
+                            channel = self.get_channel(self.discord_channel_id)
+                            message = await channel.send("🔐 Instagram 2FA Required!\n"
+                                                       "Please use the command `!2fa <code>` to provide the 2FA code.")
+                            self.twofa_message_id = message.id
+                            
+                            # Wait for 2FA code with timeout
+                            try:
+                                await asyncio.wait_for(self.wait_for_2fa(), timeout=300)  # 5 minute timeout
+                            except asyncio.TimeoutError:
+                                logger.error("Timeout waiting for 2FA code")
+                                # Try to delete the message on timeout
+                                try:
+                                    message = await channel.fetch_message(self.twofa_message_id)
+                                    await message.delete()
+                                except Exception as e:
+                                    logger.error(f"Error deleting 2FA message on timeout: {e}")
+                                self.insta_client = None
+                                return
+                            
+                            # If we have a 2FA code, try login with it
+                            if self.two_factor_code:
+                                try:
+                                    logger.info("Attempting login with 2FA...")
+                                    await loop.run_in_executor(None,
+                                        lambda: self.insta_client.login(
+                                            username=self.insta_username,
+                                            password=self.insta_password,
+                                            verification_code=self.two_factor_code
+                                        )
+                                    )
+                                    logger.info("Instagram client logged in successfully with 2FA")
+                                    self.two_factor_code = None
+                                    return
+                                except Exception as e:
+                                    logger.error(f"2FA login failed: {e}")
+                                    if "Please wait a few minutes" in str(e):
+                                        if attempt < max_retries - 1:
+                                            logger.info(f"Rate limited during 2FA, waiting {retry_delay} seconds...")
+                                            await asyncio.sleep(retry_delay)
+                                            continue
+                                        else:
+                                            logger.error("Max retries reached for 2FA rate limiting")
+                                            self.insta_client = None
+                                            return
                     
                     # Handle rate limiting
                     if "Please wait a few minutes" in error_msg or "rate limit" in error_msg.lower():
