@@ -43,15 +43,12 @@ class GooseBandTracker(commands.Bot):
         self.goose_insta_username = 'goosetheband'
 
     async def setup_instagram_client(self):
-    """
-    Set up Instagram client with login and 2FA handling
-    """
-        try:
-            self.insta_client = Client()
-            two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
+    """Set up Instagram client with login and 2FA handling"""
+    try:
+        self.insta_client = Client()
+        two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
         
         if two_factor_code:
-            # Attempt login with 2FA code
             try:
                 self.insta_client.login(
                     username=self.insta_username, 
@@ -61,7 +58,6 @@ class GooseBandTracker(commands.Bot):
                 logger.info("Instagram client logged in successfully with 2FA")
             except Exception as e:
                 logger.error(f"2FA Login failed: {e}")
-                # Fallback to standard login if 2FA fails
                 try:
                     self.insta_client.login(self.insta_username, self.insta_password)
                     logger.info("Fallback to standard login successful")
@@ -69,16 +65,16 @@ class GooseBandTracker(commands.Bot):
                     logger.error(f"Standard login failed: {standard_login_error}")
                     return
         else:
-            # Standard login without 2FA
             try:
                 self.insta_client.login(self.insta_username, self.insta_password)
                 logger.info("Instagram client logged in successfully")
             except Exception as e:
                 logger.error(f"Standard login failed: {e}")
                 return
-        except Exception as e:
-            logger.error(f"Unexpected error setting up Instagram client: {e}")
-            self.insta_client = None
+    except Exception as e:
+        logger.error(f"Unexpected error setting up Instagram client: {e}")
+        self.insta_client = None
+
 
     async def on_ready(self):
         logger.info(f'Logged in as {self.user.name}')
