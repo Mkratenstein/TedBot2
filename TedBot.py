@@ -77,9 +77,16 @@ class GooseBandTracker(commands.Bot):
             # Set up challenge handler
             self.insta_client.challenge_code_handler = handle_challenge
             
+            # Run login in a thread pool to prevent blocking
+            loop = asyncio.get_event_loop()
+            
             # First try standard login
             try:
-                self.insta_client.login(self.insta_username, self.insta_password)
+                await loop.run_in_executor(None, 
+                    self.insta_client.login, 
+                    self.insta_username, 
+                    self.insta_password
+                )
                 logger.info("Instagram client logged in successfully")
             except Exception as e:
                 logger.warning(f"Standard login failed, attempting 2FA: {e}")
@@ -87,10 +94,12 @@ class GooseBandTracker(commands.Bot):
                 if two_factor_code:
                     try:
                         # Try login with 2FA
-                        self.insta_client.login(
-                            username=self.insta_username, 
-                            password=self.insta_password,
-                            verification_code=two_factor_code
+                        await loop.run_in_executor(None,
+                            lambda: self.insta_client.login(
+                                username=self.insta_username,
+                                password=self.insta_password,
+                                verification_code=two_factor_code
+                            )
                         )
                         logger.info("Instagram client logged in successfully with 2FA")
                     except Exception as e:
@@ -99,7 +108,11 @@ class GooseBandTracker(commands.Bot):
                         try:
                             # Reset challenge handler and try again
                             self.insta_client.challenge_code_handler = handle_challenge
-                            self.insta_client.login(self.insta_username, self.insta_password)
+                            await loop.run_in_executor(None,
+                                self.insta_client.login,
+                                self.insta_username,
+                                self.insta_password
+                            )
                             logger.info("Instagram client logged in successfully after challenge")
                         except Exception as challenge_error:
                             logger.error(f"Challenge handling failed: {challenge_error}")
