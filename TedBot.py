@@ -44,6 +44,8 @@ class GooseBandTracker(commands.Bot):
         self.insta_client = None
         self.insta_username = os.getenv('INSTAGRAM_USERNAME')
         self.insta_password = os.getenv('INSTAGRAM_PASSWORD')
+        self.pending_2fa = False
+        self.two_factor_code = None
         
         # Tracking variables
         self.last_livestream = None
@@ -64,13 +66,6 @@ class GooseBandTracker(commands.Bot):
         """Set up Instagram client with login and 2FA handling"""
         try:
             self.insta_client = Client()
-            two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
-            
-            if not two_factor_code:
-                logger.error("INSTAGRAM_2FA_CODE environment variable is not set")
-                self.insta_client = None
-                return
-                
             logger.info("Starting Instagram login process...")
             
             def handle_challenge(username, choice):
@@ -82,13 +77,13 @@ class GooseBandTracker(commands.Bot):
                 
                 if 'PHONE' in choice_str or choice == 0:
                     logger.info("Handling phone verification challenge")
-                    return two_factor_code
+                    return self.two_factor_code
                 elif 'EMAIL' in choice_str or choice == 1:
                     logger.info("Handling email verification challenge")
-                    return two_factor_code
+                    return self.two_factor_code
                 elif 'SMS' in choice_str:
                     logger.info("Handling SMS verification challenge")
-                    return two_factor_code
+                    return self.two_factor_code
                     
                 logger.warning(f"Unknown challenge choice: {choice}")
                 return None
@@ -100,36 +95,74 @@ class GooseBandTracker(commands.Bot):
             loop = asyncio.get_event_loop()
             
             try:
-                # Try login with 2FA directly first
-                logger.info("Attempting login with 2FA...")
+                # Try standard login first
+                logger.info("Attempting standard login...")
                 await loop.run_in_executor(None,
-                    lambda: self.insta_client.login(
-                        username=self.insta_username,
-                        password=self.insta_password,
-                        verification_code=two_factor_code
-                    )
+                    self.insta_client.login,
+                    self.insta_username,
+                    self.insta_password
                 )
-                logger.info("Instagram client logged in successfully with 2FA")
+                logger.info("Instagram client logged in successfully")
             except Exception as e:
-                logger.warning(f"2FA login failed, attempting challenge handling: {e}")
-                try:
-                    # Reset challenge handler and try again
-                    self.insta_client.challenge_code_handler = handle_challenge
-                    logger.info("Attempting login with challenge handler...")
-                    await loop.run_in_executor(None,
-                        self.insta_client.login,
-                        self.insta_username,
-                        self.insta_password
-                    )
-                    logger.info("Instagram client logged in successfully after challenge")
-                except Exception as challenge_error:
-                    logger.error(f"Challenge handling failed: {challenge_error}")
+                logger.warning(f"Standard login failed: {e}")
+                
+                # Set pending 2FA flag and notify in Discord
+                self.pending_2fa = True
+                channel = self.get_channel(self.discord_channel_id)
+                await channel.send("🔐 Instagram 2FA Required!\n"
+                                 "Please use the command `!2fa <code>` to provide the 2FA code.")
+                
+                # Wait for 2FA code
+                while self.pending_2fa and self.two_factor_code is None:
+                    await asyncio.sleep(1)
+                
+                if self.two_factor_code:
+                    try:
+                        # Try login with 2FA
+                        logger.info("Attempting login with 2FA...")
+                        await loop.run_in_executor(None,
+                            lambda: self.insta_client.login(
+                                username=self.insta_username,
+                                password=self.insta_password,
+                                verification_code=self.two_factor_code
+                            )
+                        )
+                        logger.info("Instagram client logged in successfully with 2FA")
+                        self.pending_2fa = False
+                        self.two_factor_code = None
+                    except Exception as e:
+                        logger.error(f"2FA login failed: {e}")
+                        if "Please wait a few minutes" in str(e):
+                            logger.info("Rate limited, will retry in next check cycle")
+                        self.insta_client = None
+                        return
+                else:
+                    logger.error("2FA code not provided")
                     self.insta_client = None
                     return
                     
         except Exception as e:
             logger.error(f"Unexpected error setting up Instagram client: {e}")
             self.insta_client = None
+
+    @commands.command()
+    async def twofa(self, ctx, code: str):
+        """Handle 2FA code input from Discord"""
+        if not self.pending_2fa:
+            await ctx.send("❌ No pending 2FA request. Please try logging in again.")
+            return
+            
+        self.two_factor_code = code
+        self.pending_2fa = False
+        await ctx.send("✅ 2FA code received! Attempting to complete login...")
+        
+        # Attempt to complete login
+        await self.setup_instagram_client()
+        
+        if self.insta_client:
+            await ctx.send("✅ Instagram login successful!")
+        else:
+            await ctx.send("❌ Instagram login failed. Please check the logs for details.")
 
     async def on_ready(self):
         logger.info(f'Logged in as {self.user.name}')
