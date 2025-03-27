@@ -66,6 +66,17 @@ class GooseBandTracker(commands.Bot):
             self.insta_client = Client()
             two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
             
+            def handle_challenge(username, choice):
+                """Handle Instagram challenge verification"""
+                if choice == 0:  # Phone verification
+                    return two_factor_code
+                elif choice == 1:  # Email verification
+                    return two_factor_code
+                return None
+            
+            # Set up challenge handler
+            self.insta_client.challenge_code_handler = handle_challenge
+            
             # First try standard login
             try:
                 self.insta_client.login(self.insta_username, self.insta_password)
@@ -75,6 +86,7 @@ class GooseBandTracker(commands.Bot):
                 
                 if two_factor_code:
                     try:
+                        # Try login with 2FA
                         self.insta_client.login(
                             username=self.insta_username, 
                             password=self.insta_password,
@@ -85,8 +97,8 @@ class GooseBandTracker(commands.Bot):
                         logger.error(f"2FA Login failed: {e}")
                         # If both login attempts fail, try to handle challenge
                         try:
-                            if hasattr(self.insta_client, 'challenge_code_handler'):
-                                self.insta_client.challenge_code_handler = lambda username, choice: two_factor_code
+                            # Reset challenge handler and try again
+                            self.insta_client.challenge_code_handler = handle_challenge
                             self.insta_client.login(self.insta_username, self.insta_password)
                             logger.info("Instagram client logged in successfully after challenge")
                         except Exception as challenge_error:
