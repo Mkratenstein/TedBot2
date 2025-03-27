@@ -66,28 +66,36 @@ class GooseBandTracker(commands.Bot):
             self.insta_client = Client()
             two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
             
-            if two_factor_code:
-                try:
-                    self.insta_client.login(
-                        username=self.insta_username, 
-                        password=self.insta_password,
-                        verification_code=two_factor_code
-                    )
-                    logger.info("Instagram client logged in successfully with 2FA")
-                except Exception as e:
-                    logger.error(f"2FA Login failed: {e}")
+            # First try standard login
+            try:
+                self.insta_client.login(self.insta_username, self.insta_password)
+                logger.info("Instagram client logged in successfully")
+            except Exception as e:
+                logger.warning(f"Standard login failed, attempting 2FA: {e}")
+                
+                if two_factor_code:
                     try:
-                        self.insta_client.login(self.insta_username, self.insta_password)
-                        logger.info("Fallback to standard login successful")
-                    except Exception as standard_login_error:
-                        logger.error(f"Standard login failed: {standard_login_error}")
-                        return
-            else:
-                try:
-                    self.insta_client.login(self.insta_username, self.insta_password)
-                    logger.info("Instagram client logged in successfully")
-                except Exception as e:
-                    logger.error(f"Standard login failed: {e}")
+                        self.insta_client.login(
+                            username=self.insta_username, 
+                            password=self.insta_password,
+                            verification_code=two_factor_code
+                        )
+                        logger.info("Instagram client logged in successfully with 2FA")
+                    except Exception as e:
+                        logger.error(f"2FA Login failed: {e}")
+                        # If both login attempts fail, try to handle challenge
+                        try:
+                            if hasattr(self.insta_client, 'challenge_code_handler'):
+                                self.insta_client.challenge_code_handler = lambda username, choice: two_factor_code
+                            self.insta_client.login(self.insta_username, self.insta_password)
+                            logger.info("Instagram client logged in successfully after challenge")
+                        except Exception as challenge_error:
+                            logger.error(f"Challenge handling failed: {challenge_error}")
+                            self.insta_client = None
+                            return
+                else:
+                    logger.error("2FA code not provided in environment variables")
+                    self.insta_client = None
                     return
         except Exception as e:
             logger.error(f"Unexpected error setting up Instagram client: {e}")
@@ -212,7 +220,72 @@ class GooseBandTracker(commands.Bot):
         except Exception as e:
             logger.error(f"Error checking Instagram live: {e}")
 
-    # Existing YouTube methods remain the same as in previous implementation...
+    @tasks.loop(minutes=15)
+    async def check_youtube_updates(self):
+        """Check for new YouTube content"""
+        try:
+            # Get channel uploads playlist ID
+            channel_response = self.youtube.channels().list(
+                part='contentDetails',
+                id=self.youtube_channel_id
+            ).execute()
+            
+            if not channel_response['items']:
+                logger.error("Could not find YouTube channel")
+                return
+                
+            uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+            
+            # Get recent videos
+            playlist_response = self.youtube.playlistItems().list(
+                part='snippet',
+                playlistId=uploads_playlist_id,
+                maxResults=5
+            ).execute()
+            
+            for item in playlist_response['items']:
+                video_id = item['snippet']['resourceId']['videoId']
+                published_at = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z', '+00:00'))
+                
+                # Check if video is recent (within last 24 hours)
+                if published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                    # Check if it's a livestream
+                    video_response = self.youtube.videos().list(
+                        part='snippet,liveStreamingDetails',
+                        id=video_id
+                    ).execute()
+                    
+                    if not video_response['items']:
+                        continue
+                        
+                    video = video_response['items'][0]
+                    is_livestream = video.get('snippet', {}).get('liveBroadcastContent') == 'live'
+                    is_short = video.get('snippet', {}).get('title', '').lower().startswith('#shorts')
+                    
+                    channel = self.get_channel(self.discord_channel_id)
+                    
+                    if is_livestream and video_id != self.last_livestream:
+                        await channel.send(f"🔴 Goose is LIVE on YouTube!\n"
+                                         f"https://www.youtube.com/watch?v={video_id}")
+                        self.last_livestream = video_id
+                    elif is_short and video_id != self.last_short:
+                        await channel.send(f"🎥 New YouTube Short!\n"
+                                         f"https://www.youtube.com/watch?v={video_id}")
+                        self.last_short = video_id
+                    elif not is_livestream and not is_short and video_id != self.last_video:
+                        await channel.send(f"🎥 New YouTube Video!\n"
+                                         f"https://www.youtube.com/watch?v={video_id}")
+                        self.last_video = video_id
+                        
+                    break  # Only notify for the most recent video
+                    
+        except Exception as e:
+            logger.error(f"Error checking YouTube updates: {e}")
+
+    @check_youtube_updates.before_loop
+    async def before_check_youtube_updates(self):
+        """Wait for bot to be ready before starting YouTube check loop"""
+        await self.wait_until_ready()
 
 def main():
     try:
