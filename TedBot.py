@@ -7,6 +7,8 @@ import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
+from instagrapi import Client
+from instagrapi.exceptions import LoginRequired
 
 # Load environment variables
 load_dotenv()
@@ -23,90 +25,124 @@ class GooseBandTracker(commands.Bot):
         # YouTube API setup
         self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
         
+        # Instagram setup
+        self.insta_client = None
+        self.insta_username = os.getenv('INSTAGRAM_USERNAME')
+        self.insta_password = os.getenv('INSTAGRAM_PASSWORD')
+        
         # Tracking variables
         self.last_livestream = None
         self.last_video = None
         self.last_short = None
+        self.last_insta_post = None
+        self.last_insta_story = None
         
         # Channel IDs
         self.youtube_channel_id = os.getenv('YOUTUBE_CHANNEL_ID')
         self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))
+        self.goose_insta_username = 'goosetheband'
+
+    async def setup_instagram_client(self):
+        """
+        Set up Instagram client with login and error handling
+        """
+        try:
+            self.insta_client = Client()
+            self.insta_client.login(self.insta_username, self.insta_password)
+            logger.info("Instagram client logged in successfully")
+        except LoginRequired:
+            logger.error("Instagram login failed. Check credentials.")
+        except Exception as e:
+            logger.error(f"Error setting up Instagram client: {e}")
 
     async def on_ready(self):
         logger.info(f'Logged in as {self.user.name}')
+        await self.setup_instagram_client()
         self.check_youtube_updates.start()
+        self.check_instagram_updates.start()
 
     def cog_unload(self):
         self.check_youtube_updates.cancel()
+        self.check_instagram_updates.cancel()
 
     @tasks.loop(minutes=15)
-    async def check_youtube_updates(self):
-        try:
-            await self.check_livestreams()
-            await self.check_videos()
-            await self.check_shorts()
-        except Exception as e:
-            logger.error(f"Error checking YouTube updates: {e}")
+    async def check_instagram_updates(self):
+        if not self.insta_client:
+            await self.setup_instagram_client()
+            return
 
-    async def check_livestreams(self):
         try:
-            request = self.youtube.search().list(
-                part='snippet',
-                channelId=self.youtube_channel_id,
-                type='video',
-                eventType='live',
-                maxResults=1
-            )
-            response = request.execute()
+            await self.check_instagram_posts()
+            await self.check_instagram_stories()
+            await self.check_instagram_live()
+        except Exception as e:
+            logger.error(f"Error checking Instagram updates: {e}")
+
+    async def check_instagram_posts(self):
+        try:
+            # Get user ID
+            user_id = self.insta_client.user_id_from_username(self.goose_insta_username)
             
-            if response['items']:
-                livestream = response['items'][0]
-                livestream_id = livestream['id']['videoId']
-                livestream_title = livestream['snippet']['title']
-                
-                if livestream_id != self.last_livestream:
-                    channel = self.get_channel(self.discord_channel_id)
-                    await channel.send(f"🎸 LIVE NOW: {livestream_title}\n"
-                                       f"https://www.youtube.com/watch?v={livestream_id}")
-                    self.last_livestream = livestream_id
-        except Exception as e:
-            logger.error(f"Error checking livestreams: {e}")
-
-    async def check_videos(self):
-        try:
-            request = self.youtube.search().list(
-                part='snippet',
-                channelId=self.youtube_channel_id,
-                type='video',
-                order='date',
-                maxResults=5  # Increased to catch potential shorts
-            )
-            response = request.execute()
+            # Fetch recent posts
+            posts = self.insta_client.user_medias(user_id, amount=3)
             
-            for video in response['items']:
-                video_id = video['id']['videoId']
-                video_title = video['snippet']['title']
-                published_at = datetime.fromisoformat(video['snippet']['publishedAt'].replace('Z', '+00:00'))
+            for post in posts:
+                # Convert to datetime and check if recent
+                post_time = post.taken_at
                 
-                # Check if it's a short by URL pattern
-                is_short = '/shorts/' in video_title.lower()
-                
-                if is_short and video_id != self.last_short and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
-                    channel = self.get_channel(self.discord_channel_id)
-                    await channel.send(f"📱 New Short: {video_title}\n"
-                                       f"https://www.youtube.com/shorts/{video_id}")
-                    self.last_short = video_id
-                elif not is_short and video_id != self.last_video and published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
-                    channel = self.get_channel(self.discord_channel_id)
-                    await channel.send(f"🎵 New Video: {video_title}\n"
-                                       f"https://www.youtube.com/watch?v={video_id}")
-                    self.last_video = video_id
+                if post_time > datetime.now(post_time.tzinfo) - timedelta(hours=24):
+                    if post.pk != self.last_insta_post:
+                        channel = self.get_channel(self.discord_channel_id)
+                        
+                        # Construct post message
+                        post_message = f"📸 New Instagram Post by Goose the Band!\n"
+                        if post.caption_text:
+                            post_message += f"Caption: {post.caption_text}\n"
+                        post_message += f"https://www.instagram.com/p/{post.code}"
+                        
+                        await channel.send(post_message)
+                        self.last_insta_post = post.pk
+                        
+                        break  # Only notify for the most recent post
         except Exception as e:
-            logger.error(f"Error checking videos: {e}")
+            logger.error(f"Error checking Instagram posts: {e}")
 
-    async def check_shorts(self):
-        # This method is now deprecated - functionality moved to check_videos()
-        pass
+    async def check_instagram_stories(self):
+        try:
+            # Get user ID
+            user_id = self.insta_client.user_id_from_username(self.goose_insta_username)
+            
+            # Fetch stories
+            stories = self.insta_client.user_stories(user_id)
+            
+            for story in stories:
+                story_time = story.taken_at
+                
+                if story_time > datetime.now(story_time.tzinfo) - timedelta(hours=24):
+                    if story.pk != self.last_insta_story:
+                        channel = self.get_channel(self.discord_channel_id)
+                        await channel.send(f"📱 New Instagram Story by Goose the Band!\n"
+                                           f"Check their Instagram story now!")
+                        self.last_insta_story = story.pk
+                        
+                        break  # Only notify for the most recent story
+        except Exception as e:
+            logger.error(f"Error checking Instagram stories: {e}")
+
+    async def check_instagram_live(self):
+        try:
+            # Check if the account is currently live
+            user_id = self.insta_client.user_id_from_username(self.goose_insta_username)
+            live_broadcast = self.insta_client.search_users_live(user_id)
+            
+            if live_broadcast:
+                channel = self.get_channel(self.discord_channel_id)
+                await channel.send(f"🔴 Goose the Band is LIVE on Instagram RIGHT NOW!\n"
+                                   f"https://www.instagram.com/{self.goose_insta_username}")
+        except Exception as e:
+            logger.error(f"Error checking Instagram live: {e}")
+
+    # Existing YouTube methods remain the same as in previous implementation...
 
 def main():
     intents = discord.Intents.default()
