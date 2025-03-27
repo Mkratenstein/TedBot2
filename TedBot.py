@@ -76,12 +76,20 @@ class GooseBandTracker(commands.Bot):
             def handle_challenge(username, choice):
                 """Handle Instagram challenge verification"""
                 logger.info(f"Challenge received for {username} with choice {choice}")
-                if choice == 0:  # Phone verification
+                
+                # Handle both string and enum values
+                choice_str = str(choice).upper()
+                
+                if 'PHONE' in choice_str or choice == 0:
                     logger.info("Handling phone verification challenge")
                     return two_factor_code
-                elif choice == 1:  # Email verification
+                elif 'EMAIL' in choice_str or choice == 1:
                     logger.info("Handling email verification challenge")
                     return two_factor_code
+                elif 'SMS' in choice_str:
+                    logger.info("Handling SMS verification challenge")
+                    return two_factor_code
+                    
                 logger.warning(f"Unknown challenge choice: {choice}")
                 return None
             
