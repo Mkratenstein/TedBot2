@@ -43,7 +43,7 @@ class GooseBandTracker(commands.Bot):
         self.goose_insta_username = 'goosetheband'
 
     async def setup_instagram_client(self):
-    """Set up Instagram client with login and 2FA handling"""
+        """Set up Instagram client with login and 2FA handling"""
     try:
         self.insta_client = Client()
         two_factor_code = os.getenv('INSTAGRAM_2FA_CODE')
