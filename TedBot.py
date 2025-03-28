@@ -338,8 +338,11 @@ class GooseBandTracker(commands.Bot):
                     video_id = item['snippet']['resourceId']['videoId']
                     published_at = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z', '+00:00'))
                     
+                    logger.info(f"Processing video: {video_id} published at {published_at}")
+                    
                     # Skip if video is too old
                     if published_at < datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                        logger.info(f"Skipping video {video_id} - too old")
                         continue
                         
                     # Get video details with rate limiting
@@ -350,28 +353,38 @@ class GooseBandTracker(commands.Bot):
                     ).execute()
                     
                     if not video_response.get('items'):
+                        logger.warning(f"No video details found for video ID: {video_id}")
                         continue
                         
                     video = video_response['items'][0]
                     is_livestream = video.get('snippet', {}).get('liveBroadcastContent') == 'live'
                     is_short = video.get('snippet', {}).get('title', '').lower().startswith('#shorts')
                     
+                    logger.info(f"Video {video_id} - Livestream: {is_livestream}, Short: {is_short}")
+                    logger.info(f"Last video ID: {self.last_video}, Last short ID: {self.last_short}, Last livestream ID: {self.last_livestream}")
+                    
                     channel = self.get_channel(self.discord_channel_id)
                     
                     # Send notifications for new content
                     if is_livestream and video_id != self.last_livestream:
+                        logger.info(f"Sending livestream notification for video {video_id}")
                         await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
                         self.last_livestream = video_id
                     elif is_short and video_id != self.last_short:
+                        logger.info(f"Sending short notification for video {video_id}")
                         await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
                         self.last_short = video_id
                     elif not is_livestream and not is_short and video_id != self.last_video:
+                        logger.info(f"Sending video notification for video {video_id}")
                         await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
                         self.last_video = video_id
+                    else:
+                        logger.info(f"No notification sent for video {video_id} - already processed")
                         
                     break  # Only notify for the most recent video
                     
                 except Exception as e:
+                    logger.error(f"Error processing video: {str(e)}")
                     if not await self.handle_api_error(e):
                         return
                     continue
@@ -380,6 +393,7 @@ class GooseBandTracker(commands.Bot):
             self.last_check_time = datetime.now()
             
         except Exception as e:
+            logger.error(f"Error in check_youtube_updates: {str(e)}")
             if not await self.handle_api_error(e):
                 return
 
