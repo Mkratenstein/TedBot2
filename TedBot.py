@@ -156,13 +156,6 @@ class GooseBandTracker(commands.Bot):
                 like_count = video.get('statistics', {}).get('likeCount', '0')
                 
                 # Create embed message
-                embed = discord.Embed(
-                    title="🎲 Random Video",
-                    description=f"Here's a random video from the channel (selected from {len(playlist_response['items'])} videos):",
-                    color=discord.Color.green()
-                )
-                
-                # Add video details
                 video_embed = discord.Embed(
                     title=title,
                     description=f"https://www.youtube.com/watch?v={video_id}",
@@ -237,11 +230,14 @@ class GooseBandTracker(commands.Bot):
                             continue
                         
                         video = video_response['items'][0]
+                        # Skip livestreams
+                        if video.get('snippet', {}).get('liveBroadcastContent') == 'live':
+                            continue
+                            
                         videos.append({
                             'id': video_id,
                             'published_at': published_at,
                             'title': video['snippet']['title'],
-                            'is_livestream': video.get('snippet', {}).get('liveBroadcastContent') == 'live',
                             'view_count': video.get('statistics', {}).get('viewCount', '0'),
                             'like_count': video.get('statistics', {}).get('likeCount', '0'),
                             'thumbnail_url': video['snippet']['thumbnails']['high']['url']
@@ -257,19 +253,16 @@ class GooseBandTracker(commands.Bot):
                 # Take only the 5 most recent videos
                 videos = videos[:5]
                 
-                # Create main embed
-                main_embed = discord.Embed(
-                    title="🎥 Latest Videos",
-                    description="Here are the 5 most recent videos from the channel:",
-                    color=discord.Color.blue()
-                )
+                if not videos:
+                    await ctx.send("No recent videos found (excluding livestreams).")
+                    return
                 
                 # Send each video embed
                 for video in videos:
                     video_embed = discord.Embed(
                         title=video['title'],
                         description=f"https://www.youtube.com/watch?v={video['id']}",
-                        color=discord.Color.red() if video['is_livestream'] else discord.Color.blue(),
+                        color=discord.Color.blue(),
                         timestamp=video['published_at']
                     )
                     
@@ -279,10 +272,6 @@ class GooseBandTracker(commands.Bot):
                     # Add video stats
                     video_embed.add_field(name="Views", value=video['view_count'], inline=True)
                     video_embed.add_field(name="Likes", value=video['like_count'], inline=True)
-                    
-                    # Add video type indicator
-                    video_type = "🔴 LIVE" if video['is_livestream'] else "🎥 Video"
-                    video_embed.add_field(name="Type", value=video_type, inline=True)
                     
                     # Add publish date
                     video_embed.set_footer(text=f"Published on {video['published_at'].strftime('%Y-%m-%d %H:%M:%S')}")
