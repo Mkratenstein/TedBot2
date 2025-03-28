@@ -92,6 +92,11 @@ class GooseBandTracker(commands.Bot):
         # Register commands
         self._register_commands()
 
+    async def setup_hook(self) -> None:
+        """Set up the bot's slash commands"""
+        # Sync commands with Discord
+        await self.tree.sync()
+
     def _validate_env_vars(self) -> None:
         """Validate required environment variables"""
         required_vars = [
@@ -129,10 +134,13 @@ class GooseBandTracker(commands.Bot):
         async def ping(ctx: commands.Context) -> None:
             await ctx.send('Pong! Goose Youtube Tracker is alive!')
             
-        @self.command()
-        async def randomvideo(ctx: commands.Context) -> None:
+        @self.tree.command(name="random", description="Get a random video from the channel")
+        async def random(interaction: discord.Interaction) -> None:
             """Get a random video from the channel"""
             try:
+                # Defer the response since this might take a while
+                await interaction.response.defer()
+                
                 # Get channel uploads playlist ID (cached)
                 uploads_playlist_id = await self.get_uploads_playlist_id()
                 
@@ -146,7 +154,7 @@ class GooseBandTracker(commands.Bot):
                 
                 if not playlist_response.get('items'):
                     logger.warning("No videos found in uploads playlist")
-                    await ctx.send("No videos found in the channel.")
+                    await interaction.followup.send("No videos found in the channel.")
                     return
                 
                 # Select a random video from the larger pool
@@ -165,7 +173,7 @@ class GooseBandTracker(commands.Bot):
                 
                 if not video_response.get('items'):
                     logger.error(f"No video details found for video ID: {video_id}")
-                    await ctx.send("Could not fetch video details. The video might be private or deleted.")
+                    await interaction.followup.send("Could not fetch video details. The video might be private or deleted.")
                     return
                 
                 video = video_response['items'][0]
@@ -196,21 +204,21 @@ class GooseBandTracker(commands.Bot):
                 # Add publish date
                 video_embed.set_footer(text=f"Published on {published_at.strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                await ctx.send(embed=video_embed)
+                await interaction.followup.send(embed=video_embed)
                 
             except HttpError as e:
                 error_message = f"YouTube API error: {e.resp.status} - {e.content}"
                 logger.error(error_message)
-                await ctx.send(f"An error occurred while accessing YouTube API: {e.resp.status}")
+                await interaction.followup.send(f"An error occurred while accessing YouTube API: {e.resp.status}")
             except ValueError as e:
                 error_message = f"Invalid data received: {str(e)}"
                 logger.error(error_message)
-                await ctx.send("Received invalid data from YouTube. Please try again later.")
+                await interaction.followup.send("Received invalid data from YouTube. Please try again later.")
             except Exception as e:
                 error_type = type(e).__name__
-                error_message = f"Unexpected error in randomvideo command: {error_type} - {str(e)}"
+                error_message = f"Unexpected error in random command: {error_type} - {str(e)}"
                 logger.error(error_message)
-                await ctx.send(f"An unexpected error occurred: {error_type}. Please check the bot logs for details.")
+                await interaction.followup.send(f"An unexpected error occurred: {error_type}. Please check the bot logs for details.")
             
         @self.command()
         async def status(ctx: commands.Context) -> None:
