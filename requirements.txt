@@ -2,5 +2,3 @@ discord.py==2.3.2
 google-api-python-client==2.97.0
 python-dotenv==1.0.0
 aiohttp==3.9.3
-instagrapi==2.0.0
-pillow==10.2.0
