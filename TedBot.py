@@ -40,6 +40,31 @@ class RateLimiter:
         
         self.requests.append(now)
 
+class AsyncCache:
+    def __init__(self, maxsize=128):
+        self.maxsize = maxsize
+        self.cache = {}
+        self.times = {}
+
+    def get(self, key):
+        if key in self.cache:
+            return self.cache[key]
+        return None
+
+    def set(self, key, value):
+        if len(self.cache) >= self.maxsize:
+            # Remove oldest item
+            oldest_key = min(self.times.items(), key=lambda x: x[1])[0]
+            del self.cache[oldest_key]
+            del self.times[oldest_key]
+        
+        self.cache[key] = value
+        self.times[key] = time.time()
+
+    def clear(self):
+        self.cache.clear()
+        self.times.clear()
+
 class GooseBandTracker(commands.Bot):
     def __init__(self, intents):
         super().__init__(command_prefix='!', intents=intents)
@@ -177,9 +202,16 @@ class GooseBandTracker(commands.Bot):
             status_message += f"- Consecutive Errors: {self.consecutive_errors}"
             await ctx.send(status_message)
 
-    @lru_cache(maxsize=1)
+        # Add this line after the other initializations
+        self.playlist_cache = AsyncCache(maxsize=1)
+
     async def get_uploads_playlist_id(self) -> str:
         """Cache the uploads playlist ID to reduce API calls"""
+        # Check cache first
+        cached_id = self.playlist_cache.get('uploads_id')
+        if cached_id:
+            return cached_id
+
         await self.rate_limiter.acquire()
         channel_response = self.youtube.channels().list(
             part='contentDetails',
@@ -188,8 +220,10 @@ class GooseBandTracker(commands.Bot):
         
         if not channel_response.get('items'):
             raise ValueError(f"Could not find YouTube channel with ID: {self.youtube_channel_id}")
-            
-        return channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        
+        playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        self.playlist_cache.set('uploads_id', playlist_id)
+        return playlist_id
 
     async def handle_api_error(self, error: Exception) -> bool:
         """Handle API errors and implement backoff strategy"""
