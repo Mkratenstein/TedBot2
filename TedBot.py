@@ -6,6 +6,7 @@ import sys
 from typing import Dict, Optional
 from functools import lru_cache
 import time
+import random
 
 import discord
 from discord.ext import commands, tasks
@@ -112,18 +113,18 @@ class GooseBandTracker(commands.Bot):
             await ctx.send('Pong! Goose Youtube Tracker is alive!')
             
         @self.command()
-        async def latest(ctx):
-            """Get the latest video from the channel"""
+        async def random(ctx):
+            """Get a random video from the channel"""
             try:
                 # Get channel uploads playlist ID (cached)
                 uploads_playlist_id = await self.get_uploads_playlist_id()
                 
-                # Get most recent video with rate limiting
+                # Get videos with rate limiting
                 await self.rate_limiter.acquire()
                 playlist_response = self.youtube.playlistItems().list(
                     part='snippet',
                     playlistId=uploads_playlist_id,
-                    maxResults=1
+                    maxResults=100  # Get up to 100 videos for better randomization
                 ).execute()
                 
                 if not playlist_response.get('items'):
@@ -131,9 +132,10 @@ class GooseBandTracker(commands.Bot):
                     await ctx.send("No videos found in the channel.")
                     return
                 
-                # Get video details
-                video_id = playlist_response['items'][0]['snippet']['resourceId']['videoId']
-                published_at = datetime.fromisoformat(playlist_response['items'][0]['snippet']['publishedAt'].replace('Z', '+00:00'))
+                # Select a random video from the larger pool
+                random_item = random.choice(playlist_response['items'])
+                video_id = random_item['snippet']['resourceId']['videoId']
+                published_at = datetime.fromisoformat(random_item['snippet']['publishedAt'].replace('Z', '+00:00'))
                 
                 # Get additional video details
                 await self.rate_limiter.acquire()
@@ -149,13 +151,19 @@ class GooseBandTracker(commands.Bot):
                 
                 video = video_response['items'][0]
                 title = video['snippet']['title']
-                description = video['snippet']['description']
                 is_livestream = video.get('snippet', {}).get('liveBroadcastContent') == 'live'
                 view_count = video.get('statistics', {}).get('viewCount', '0')
                 like_count = video.get('statistics', {}).get('likeCount', '0')
                 
                 # Create embed message
                 embed = discord.Embed(
+                    title="🎲 Random Video",
+                    description=f"Here's a random video from the channel (selected from {len(playlist_response['items'])} videos):",
+                    color=discord.Color.green()
+                )
+                
+                # Add video details
+                video_embed = discord.Embed(
                     title=title,
                     description=f"https://www.youtube.com/watch?v={video_id}",
                     color=discord.Color.red() if is_livestream else discord.Color.blue(),
@@ -163,20 +171,126 @@ class GooseBandTracker(commands.Bot):
                 )
                 
                 # Add video thumbnail
-                embed.set_thumbnail(url=video['snippet']['thumbnails']['high']['url'])
+                video_embed.set_thumbnail(url=video['snippet']['thumbnails']['high']['url'])
                 
                 # Add video stats
-                embed.add_field(name="Views", value=view_count, inline=True)
-                embed.add_field(name="Likes", value=like_count, inline=True)
+                video_embed.add_field(name="Views", value=view_count, inline=True)
+                video_embed.add_field(name="Likes", value=like_count, inline=True)
                 
                 # Add video type indicator
                 video_type = "🔴 LIVE" if is_livestream else "🎥 Video"
-                embed.add_field(name="Type", value=video_type, inline=True)
+                video_embed.add_field(name="Type", value=video_type, inline=True)
                 
                 # Add publish date
-                embed.set_footer(text=f"Published on {published_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                video_embed.set_footer(text=f"Published on {published_at.strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                await ctx.send(embed=embed)
+                await ctx.send(embed=video_embed)
+                
+            except HttpError as e:
+                error_message = f"YouTube API error: {e.resp.status} - {e.content}"
+                logger.error(error_message)
+                await ctx.send(f"An error occurred while accessing YouTube API: {e.resp.status}")
+            except ValueError as e:
+                error_message = f"Invalid data received: {str(e)}"
+                logger.error(error_message)
+                await ctx.send("Received invalid data from YouTube. Please try again later.")
+            except Exception as e:
+                error_message = f"Unexpected error in random command: {str(e)}"
+                logger.error(error_message)
+                await ctx.send("An unexpected error occurred. Please check the bot logs for details.")
+            
+        @self.command()
+        async def latest(ctx):
+            """Get the latest 5 videos from the channel"""
+            try:
+                # Get channel uploads playlist ID (cached)
+                uploads_playlist_id = await self.get_uploads_playlist_id()
+                
+                # Get most recent videos with rate limiting
+                await self.rate_limiter.acquire()
+                playlist_response = self.youtube.playlistItems().list(
+                    part='snippet',
+                    playlistId=uploads_playlist_id,
+                    maxResults=50  # Get more videos to ensure we have enough after filtering
+                ).execute()
+                
+                if not playlist_response.get('items'):
+                    logger.warning("No videos found in uploads playlist")
+                    await ctx.send("No videos found in the channel.")
+                    return
+                
+                # Sort videos by publication date (newest first)
+                videos = []
+                for item in playlist_response['items']:
+                    try:
+                        video_id = item['snippet']['resourceId']['videoId']
+                        published_at = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z', '+00:00'))
+                        
+                        # Get additional video details
+                        await self.rate_limiter.acquire()
+                        video_response = self.youtube.videos().list(
+                            part='snippet,liveStreamingDetails,statistics',
+                            id=video_id
+                        ).execute()
+                        
+                        if not video_response.get('items'):
+                            continue
+                        
+                        video = video_response['items'][0]
+                        videos.append({
+                            'id': video_id,
+                            'published_at': published_at,
+                            'title': video['snippet']['title'],
+                            'is_livestream': video.get('snippet', {}).get('liveBroadcastContent') == 'live',
+                            'view_count': video.get('statistics', {}).get('viewCount', '0'),
+                            'like_count': video.get('statistics', {}).get('likeCount', '0'),
+                            'thumbnail_url': video['snippet']['thumbnails']['high']['url']
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing video: {str(e)}")
+                        continue
+                
+                # Sort videos by publication date (newest first)
+                videos.sort(key=lambda x: x['published_at'], reverse=True)
+                
+                # Take only the 5 most recent videos
+                videos = videos[:5]
+                
+                # Create main embed
+                main_embed = discord.Embed(
+                    title="🎥 Latest Videos",
+                    description="Here are the 5 most recent videos from the channel:",
+                    color=discord.Color.blue()
+                )
+                
+                # Send each video embed
+                for video in videos:
+                    video_embed = discord.Embed(
+                        title=video['title'],
+                        description=f"https://www.youtube.com/watch?v={video['id']}",
+                        color=discord.Color.red() if video['is_livestream'] else discord.Color.blue(),
+                        timestamp=video['published_at']
+                    )
+                    
+                    # Add video thumbnail
+                    video_embed.set_thumbnail(url=video['thumbnail_url'])
+                    
+                    # Add video stats
+                    video_embed.add_field(name="Views", value=video['view_count'], inline=True)
+                    video_embed.add_field(name="Likes", value=video['like_count'], inline=True)
+                    
+                    # Add video type indicator
+                    video_type = "🔴 LIVE" if video['is_livestream'] else "🎥 Video"
+                    video_embed.add_field(name="Type", value=video_type, inline=True)
+                    
+                    # Add publish date
+                    video_embed.set_footer(text=f"Published on {video['published_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    await ctx.send(embed=video_embed)
+                
+                # Send summary message
+                await ctx.send("That's all the recent videos! 🎉")
                 
             except HttpError as e:
                 error_message = f"YouTube API error: {e.resp.status} - {e.content}"
