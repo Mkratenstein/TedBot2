@@ -365,6 +365,20 @@ class GooseBandTracker(commands.Bot):
                     
                     channel = self.get_channel(self.discord_channel_id)
                     
+                    if not channel:
+                        logger.error(f"Could not find Discord channel with ID: {self.discord_channel_id}")
+                        return
+                        
+                    # Log channel permissions
+                    bot_member = channel.guild.get_member(self.user.id)
+                    if bot_member:
+                        logger.info(f"Bot permissions in channel {channel.name}:")
+                        logger.info(f"- Send Messages: {channel.permissions_for(bot_member).send_messages}")
+                        logger.info(f"- Embed Links: {channel.permissions_for(bot_member).embed_links}")
+                        logger.info(f"- Read Messages: {channel.permissions_for(bot_member).read_messages}")
+                    else:
+                        logger.error(f"Could not find bot member in guild {channel.guild.name}")
+                    
                     # Send notifications for new content
                     if is_livestream and video_id != self.last_livestream:
                         logger.info(f"Sending livestream notification for video {video_id}")
