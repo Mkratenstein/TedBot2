@@ -103,11 +103,12 @@ class GooseBandTracker(commands.Bot):
                 id=self.youtube_channel_id
             ).execute()
             
-            if not channel_response['items']:
-                logger.error("Could not find YouTube channel")
+            if not channel_response.get('items'):
+                logger.error(f"Could not find YouTube channel with ID: {self.youtube_channel_id}")
                 return
                 
             uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+            logger.info(f"Found uploads playlist ID: {uploads_playlist_id}")
             
             # Get recent videos
             playlist_response = self.youtube.playlistItems().list(
@@ -116,44 +117,63 @@ class GooseBandTracker(commands.Bot):
                 maxResults=5
             ).execute()
             
-            for item in playlist_response['items']:
-                video_id = item['snippet']['resourceId']['videoId']
-                published_at = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z', '+00:00'))
+            if not playlist_response.get('items'):
+                logger.warning("No videos found in uploads playlist")
+                return
                 
-                # Check if video is recent (within last 24 hours)
-                if published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
-                    # Check if it's a livestream
-                    video_response = self.youtube.videos().list(
-                        part='snippet,liveStreamingDetails',
-                        id=video_id
-                    ).execute()
+            logger.info(f"Found {len(playlist_response['items'])} recent videos")
+            
+            for item in playlist_response['items']:
+                try:
+                    video_id = item['snippet']['resourceId']['videoId']
+                    published_at = datetime.fromisoformat(item['snippet']['publishedAt'].replace('Z', '+00:00'))
                     
-                    if not video_response['items']:
-                        continue
+                    # Check if video is recent (within last 24 hours)
+                    if published_at > datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                        # Check if it's a livestream
+                        video_response = self.youtube.videos().list(
+                            part='snippet,liveStreamingDetails',
+                            id=video_id
+                        ).execute()
                         
-                    video = video_response['items'][0]
-                    is_livestream = video.get('snippet', {}).get('liveBroadcastContent') == 'live'
-                    is_short = video.get('snippet', {}).get('title', '').lower().startswith('#shorts')
-                    
-                    channel = self.get_channel(self.discord_channel_id)
-                    
-                    if is_livestream and video_id != self.last_livestream:
-                        await channel.send(f"🔴 Goose is LIVE on YouTube!\n"
-                                         f"https://www.youtube.com/watch?v={video_id}")
-                        self.last_livestream = video_id
-                    elif is_short and video_id != self.last_short:
-                        await channel.send(f"🎥 New YouTube Short!\n"
-                                         f"https://www.youtube.com/watch?v={video_id}")
-                        self.last_short = video_id
-                    elif not is_livestream and not is_short and video_id != self.last_video:
-                        await channel.send(f"🎥 New YouTube Video!\n"
-                                         f"https://www.youtube.com/watch?v={video_id}")
-                        self.last_video = video_id
+                        if not video_response.get('items'):
+                            logger.warning(f"No video details found for video ID: {video_id}")
+                            continue
+                            
+                        video = video_response['items'][0]
+                        is_livestream = video.get('snippet', {}).get('liveBroadcastContent') == 'live'
+                        is_short = video.get('snippet', {}).get('title', '').lower().startswith('#shorts')
                         
-                    break  # Only notify for the most recent video
+                        channel = self.get_channel(self.discord_channel_id)
+                        
+                        if is_livestream and video_id != self.last_livestream:
+                            logger.info(f"New livestream detected: {video_id}")
+                            await channel.send(f"🔴 Goose is LIVE on YouTube!\n"
+                                             f"https://www.youtube.com/watch?v={video_id}")
+                            self.last_livestream = video_id
+                        elif is_short and video_id != self.last_short:
+                            logger.info(f"New short detected: {video_id}")
+                            await channel.send(f"🎥 New YouTube Short!\n"
+                                             f"https://www.youtube.com/watch?v={video_id}")
+                            self.last_short = video_id
+                        elif not is_livestream and not is_short and video_id != self.last_video:
+                            logger.info(f"New video detected: {video_id}")
+                            await channel.send(f"🎥 New YouTube Video!\n"
+                                             f"https://www.youtube.com/watch?v={video_id}")
+                            self.last_video = video_id
+                            
+                        break  # Only notify for the most recent video
+                except KeyError as e:
+                    logger.error(f"Missing required field in video data: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error processing video: {e}")
+                    continue
                     
         except Exception as e:
             logger.error(f"Error checking YouTube updates: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
 
     @check_youtube_updates.before_loop
     async def before_check_youtube_updates(self):
