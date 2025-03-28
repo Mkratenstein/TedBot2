@@ -7,6 +7,7 @@ from typing import Dict, Optional, List, Any
 from functools import lru_cache
 import time
 import random as random_module
+import json
 
 import discord
 from discord.ext import commands, tasks
@@ -120,13 +121,47 @@ class GooseBandTracker(commands.Bot):
 
     def _init_tracking_vars(self) -> None:
         """Initialize tracking variables"""
-        self.last_livestream: Optional[str] = None
-        self.last_video: Optional[str] = None
-        self.last_short: Optional[str] = None
-        self.last_check_time: Optional[datetime] = None
+        try:
+            # Try to load tracking variables from file
+            if os.path.exists('tracking_vars.json'):
+                with open('tracking_vars.json', 'r') as f:
+                    data = json.load(f)
+                    self.last_livestream = data.get('last_livestream')
+                    self.last_video = data.get('last_video')
+                    self.last_short = data.get('last_short')
+                    self.last_check_time = datetime.fromisoformat(data['last_check_time']) if data.get('last_check_time') else None
+                    logger.info("Loaded tracking variables from file")
+            else:
+                self.last_livestream = None
+                self.last_video = None
+                self.last_short = None
+                self.last_check_time = None
+                logger.info("No tracking variables file found, starting fresh")
+        except Exception as e:
+            logger.error(f"Error loading tracking variables: {e}")
+            self.last_livestream = None
+            self.last_video = None
+            self.last_short = None
+            self.last_check_time = None
+        
         self.active_tasks: set = set()
         self.consecutive_errors: int = 0
         self.max_consecutive_errors: int = 3
+
+    def _save_tracking_vars(self) -> None:
+        """Save tracking variables to file"""
+        try:
+            data = {
+                'last_livestream': self.last_livestream,
+                'last_video': self.last_video,
+                'last_short': self.last_short,
+                'last_check_time': self.last_check_time.isoformat() if self.last_check_time else None
+            }
+            with open('tracking_vars.json', 'w') as f:
+                json.dump(data, f)
+            logger.info("Saved tracking variables to file")
+        except Exception as e:
+            logger.error(f"Error saving tracking variables: {e}")
 
     def _register_commands(self) -> None:
         """Register bot commands"""
@@ -290,6 +325,9 @@ class GooseBandTracker(commands.Bot):
     async def close(self) -> None:
         """Gracefully shut down the bot and cancel all tasks"""
         logger.info("Shutting down bot...")
+        
+        # Save tracking variables before shutting down
+        self._save_tracking_vars()
         
         # Cancel all active tasks
         for task in self.active_tasks:
