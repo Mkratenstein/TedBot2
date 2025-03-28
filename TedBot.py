@@ -134,8 +134,8 @@ class GooseBandTracker(commands.Bot):
         async def ping(ctx: commands.Context) -> None:
             await ctx.send('Pong! Goose Youtube Tracker is alive!')
             
-        @self.tree.command(name="random", description="Get a random video from the channel")
-        async def random(interaction: discord.Interaction) -> None:
+        @self.tree.command(name="randomYoutube", description="Get a random video from the channel")
+        async def random_youtube(interaction: discord.Interaction) -> None:
             """Get a random video from the channel"""
             try:
                 # Defer the response since this might take a while
