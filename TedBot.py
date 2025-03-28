@@ -102,6 +102,7 @@ class GooseBandTracker(commands.Bot):
                 ).execute()
                 
                 if not playlist_response.get('items'):
+                    logger.warning("No videos found in uploads playlist")
                     await ctx.send("No videos found in the channel.")
                     return
                 
@@ -117,7 +118,8 @@ class GooseBandTracker(commands.Bot):
                 ).execute()
                 
                 if not video_response.get('items'):
-                    await ctx.send("Could not fetch video details.")
+                    logger.error(f"No video details found for video ID: {video_id}")
+                    await ctx.send("Could not fetch video details. The video might be private or deleted.")
                     return
                 
                 video = video_response['items'][0]
@@ -151,9 +153,18 @@ class GooseBandTracker(commands.Bot):
                 
                 await ctx.send(embed=embed)
                 
+            except HttpError as e:
+                error_message = f"YouTube API error: {e.resp.status} - {e.content}"
+                logger.error(error_message)
+                await ctx.send(f"An error occurred while accessing YouTube API: {e.resp.status}")
+            except ValueError as e:
+                error_message = f"Invalid data received: {str(e)}"
+                logger.error(error_message)
+                await ctx.send("Received invalid data from YouTube. Please try again later.")
             except Exception as e:
-                logger.error(f"Error fetching latest video: {e}")
-                await ctx.send("An error occurred while fetching the latest video.")
+                error_message = f"Unexpected error in latest command: {str(e)}"
+                logger.error(error_message)
+                await ctx.send("An unexpected error occurred. Please check the bot logs for details.")
             
         @self.command()
         async def status(ctx):
