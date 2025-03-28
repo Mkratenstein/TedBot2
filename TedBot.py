@@ -421,33 +421,66 @@ class GooseBandTracker(commands.Bot):
                     if is_livestream and video_id != self.last_livestream:
                         logger.info(f"Sending livestream notification for video {video_id}")
                         try:
-                            await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
+                            message = await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Successfully sent message with ID: {message.id}")
                             self.last_livestream = video_id
+                            self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending livestream notification: {e}")
                             logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                            logger.error(f"Bot ID: {self.user.id}")
+                            logger.error(f"HTTP Status: {e.status}")
+                            logger.error(f"Error Code: {e.code}")
+                        except discord.HTTPException as e:
+                            logger.error(f"HTTP error sending livestream notification: {e}")
+                            logger.error(f"Status: {e.status}")
+                            logger.error(f"Response: {e.response}")
                         except Exception as e:
                             logger.error(f"Error sending livestream notification: {str(e)}")
+                            logger.error(f"Error type: {type(e).__name__}")
                     elif is_short and video_id != self.last_short:
                         logger.info(f"Sending short notification for video {video_id}")
                         try:
-                            await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
+                            message = await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Successfully sent message with ID: {message.id}")
                             self.last_short = video_id
+                            self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending short notification: {e}")
                             logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                            logger.error(f"Bot ID: {self.user.id}")
+                            logger.error(f"HTTP Status: {e.status}")
+                            logger.error(f"Error Code: {e.code}")
+                        except discord.HTTPException as e:
+                            logger.error(f"HTTP error sending short notification: {e}")
+                            logger.error(f"Status: {e.status}")
+                            logger.error(f"Response: {e.response}")
                         except Exception as e:
                             logger.error(f"Error sending short notification: {str(e)}")
+                            logger.error(f"Error type: {type(e).__name__}")
                     elif not is_livestream and not is_short and video_id != self.last_video:
                         logger.info(f"Sending video notification for video {video_id}")
                         try:
-                            await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
+                            message = await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
+                            logger.info(f"Successfully sent message with ID: {message.id}")
                             self.last_video = video_id
+                            self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending video notification: {e}")
                             logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                            logger.error(f"Bot ID: {self.user.id}")
+                            logger.error(f"HTTP Status: {e.status}")
+                            logger.error(f"Error Code: {e.code}")
+                        except discord.HTTPException as e:
+                            logger.error(f"HTTP error sending video notification: {e}")
+                            logger.error(f"Status: {e.status}")
+                            logger.error(f"Response: {e.response}")
                         except Exception as e:
                             logger.error(f"Error sending video notification: {str(e)}")
+                            logger.error(f"Error type: {type(e).__name__}")
                     else:
                         logger.info(f"No notification sent for video {video_id} - already processed")
                         
