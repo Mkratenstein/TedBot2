@@ -3,10 +3,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 import sys
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from functools import lru_cache
 import time
-import random
+import random as random_module
 
 import discord
 from discord.ext import commands, tasks
@@ -18,17 +18,23 @@ from googleapiclient.errors import HttpError
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class RateLimiter:
     def __init__(self, max_requests: int, time_window: int):
         self.max_requests = max_requests
         self.time_window = time_window
-        self.requests = []
+        self.requests: List[float] = []
 
-    async def acquire(self):
+    async def acquire(self) -> None:
         now = time.time()
         # Remove old requests
         self.requests = [req_time for req_time in self.requests if now - req_time < self.time_window]
@@ -42,17 +48,17 @@ class RateLimiter:
         self.requests.append(now)
 
 class AsyncCache:
-    def __init__(self, maxsize=128):
+    def __init__(self, maxsize: int = 128):
         self.maxsize = maxsize
-        self.cache = {}
-        self.times = {}
+        self.cache: Dict[str, Any] = {}
+        self.times: Dict[str, float] = {}
 
-    def get(self, key):
+    def get(self, key: str) -> Optional[Any]:
         if key in self.cache:
             return self.cache[key]
         return None
 
-    def set(self, key, value):
+    def set(self, key: str, value: Any) -> None:
         if len(self.cache) >= self.maxsize:
             # Remove oldest item
             oldest_key = min(self.times.items(), key=lambda x: x[1])[0]
@@ -62,15 +68,32 @@ class AsyncCache:
         self.cache[key] = value
         self.times[key] = time.time()
 
-    def clear(self):
+    def clear(self) -> None:
         self.cache.clear()
         self.times.clear()
 
 class GooseBandTracker(commands.Bot):
-    def __init__(self, intents):
+    def __init__(self, intents: discord.Intents):
         super().__init__(command_prefix='!', intents=intents)
         
         # Validate required environment variables
+        self._validate_env_vars()
+        
+        # YouTube API setup with rate limiting
+        self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
+        self.rate_limiter = RateLimiter(max_requests=100, time_window=60)  # 100 requests per minute
+        
+        # Initialize tracking variables
+        self._init_tracking_vars()
+        
+        # Initialize caches
+        self.playlist_cache = AsyncCache(maxsize=1)
+        
+        # Register commands
+        self._register_commands()
+
+    def _validate_env_vars(self) -> None:
+        """Validate required environment variables"""
         required_vars = [
             'YOUTUBE_API_KEY',
             'DISCORD_TOKEN',
@@ -82,38 +105,32 @@ class GooseBandTracker(commands.Bot):
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
         
-        # YouTube API setup with rate limiting
-        self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
-        self.rate_limiter = RateLimiter(max_requests=100, time_window=60)  # 100 requests per minute
-        
         # Validate YouTube channel ID format
         self.youtube_channel_id = os.getenv('YOUTUBE_CHANNEL_ID')
         if not self.youtube_channel_id.startswith('UC'):
             logger.warning(f"Warning: YouTube channel ID '{self.youtube_channel_id}' may be invalid. Channel IDs should start with 'UC'")
         
-        # Tracking variables with type hints
+        # Set Discord channel ID
+        self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))
+
+    def _init_tracking_vars(self) -> None:
+        """Initialize tracking variables"""
         self.last_livestream: Optional[str] = None
         self.last_video: Optional[str] = None
         self.last_short: Optional[str] = None
         self.last_check_time: Optional[datetime] = None
-        
-        # Channel IDs
-        self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))
-        
-        # Task tracking
-        self.active_tasks = set()
-        
-        # Error tracking
-        self.consecutive_errors = 0
-        self.max_consecutive_errors = 3
-        
-        # Register commands
+        self.active_tasks: set = set()
+        self.consecutive_errors: int = 0
+        self.max_consecutive_errors: int = 3
+
+    def _register_commands(self) -> None:
+        """Register bot commands"""
         @self.command()
-        async def ping(ctx):
+        async def ping(ctx: commands.Context) -> None:
             await ctx.send('Pong! Goose Youtube Tracker is alive!')
             
         @self.command()
-        async def random(ctx):
+        async def randomvideo(ctx: commands.Context) -> None:
             """Get a random video from the channel"""
             try:
                 # Get channel uploads playlist ID (cached)
@@ -134,7 +151,7 @@ class GooseBandTracker(commands.Bot):
                 
                 # Select a random video from the larger pool
                 items = playlist_response['items']
-                random_index = random.randint(0, len(items) - 1)
+                random_index = random_module.randint(0, len(items) - 1)
                 random_item = items[random_index]
                 video_id = random_item['snippet']['resourceId']['videoId']
                 published_at = datetime.fromisoformat(random_item['snippet']['publishedAt'].replace('Z', '+00:00'))
@@ -190,12 +207,13 @@ class GooseBandTracker(commands.Bot):
                 logger.error(error_message)
                 await ctx.send("Received invalid data from YouTube. Please try again later.")
             except Exception as e:
-                error_message = f"Unexpected error in random command: {str(e)}"
+                error_type = type(e).__name__
+                error_message = f"Unexpected error in randomvideo command: {error_type} - {str(e)}"
                 logger.error(error_message)
-                await ctx.send("An unexpected error occurred. Please check the bot logs for details.")
+                await ctx.send(f"An unexpected error occurred: {error_type}. Please check the bot logs for details.")
             
         @self.command()
-        async def status(ctx):
+        async def status(ctx: commands.Context) -> None:
             """Check the status of the bot and its services"""
             status_message = "🟢 Bot Status:\n"
             status_message += f"- Discord: Connected as {self.user.name}\n"
@@ -204,9 +222,6 @@ class GooseBandTracker(commands.Bot):
             status_message += f"- Last Check: {self.last_check_time.strftime('%Y-%m-%d %H:%M:%S') if self.last_check_time else 'Never'}\n"
             status_message += f"- Consecutive Errors: {self.consecutive_errors}"
             await ctx.send(status_message)
-
-        # Add this line after the other initializations
-        self.playlist_cache = AsyncCache(maxsize=1)
 
     async def get_uploads_playlist_id(self) -> str:
         """Cache the uploads playlist ID to reduce API calls"""
@@ -245,7 +260,8 @@ class GooseBandTracker(commands.Bot):
             logger.error(f"Unexpected error: {error}")
         return True
 
-    async def on_ready(self):
+    async def on_ready(self) -> None:
+        """Called when the bot is ready and connected to Discord"""
         logger.info(f'Logged in as {self.user.name}')
         
         # Start background tasks
@@ -254,7 +270,7 @@ class GooseBandTracker(commands.Bot):
         # Add tasks to active tasks set
         self.active_tasks.add(self.check_youtube_updates)
 
-    async def close(self):
+    async def close(self) -> None:
         """Gracefully shut down the bot and cancel all tasks"""
         logger.info("Shutting down bot...")
         
@@ -271,14 +287,14 @@ class GooseBandTracker(commands.Bot):
         await super().close()
         logger.info("Bot shutdown complete")
 
-    def cog_unload(self):
+    def cog_unload(self) -> None:
         """Cancel all tasks when cog is unloaded"""
         for task in self.active_tasks:
             if task.is_running():
                 task.cancel()
 
     @tasks.loop(minutes=15)
-    async def check_youtube_updates(self):
+    async def check_youtube_updates(self) -> None:
         """Check for new YouTube content with improved error handling and caching"""
         try:
             # Reset error counter on successful check
@@ -351,11 +367,11 @@ class GooseBandTracker(commands.Bot):
                 return
 
     @check_youtube_updates.before_loop
-    async def before_check_youtube_updates(self):
+    async def before_check_youtube_updates(self) -> None:
         """Wait for bot to be ready before starting YouTube check loop"""
         await self.wait_until_ready()
 
-def main():
+def main() -> None:
     try:
         intents = discord.Intents.default()
         intents.message_content = True
