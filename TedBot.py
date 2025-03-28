@@ -382,16 +382,34 @@ class GooseBandTracker(commands.Bot):
                     # Send notifications for new content
                     if is_livestream and video_id != self.last_livestream:
                         logger.info(f"Sending livestream notification for video {video_id}")
-                        await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
-                        self.last_livestream = video_id
+                        try:
+                            await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
+                            self.last_livestream = video_id
+                        except discord.Forbidden as e:
+                            logger.error(f"Forbidden error sending livestream notification: {e}")
+                            logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                        except Exception as e:
+                            logger.error(f"Error sending livestream notification: {str(e)}")
                     elif is_short and video_id != self.last_short:
                         logger.info(f"Sending short notification for video {video_id}")
-                        await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
-                        self.last_short = video_id
+                        try:
+                            await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
+                            self.last_short = video_id
+                        except discord.Forbidden as e:
+                            logger.error(f"Forbidden error sending short notification: {e}")
+                            logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                        except Exception as e:
+                            logger.error(f"Error sending short notification: {str(e)}")
                     elif not is_livestream and not is_short and video_id != self.last_video:
                         logger.info(f"Sending video notification for video {video_id}")
-                        await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
-                        self.last_video = video_id
+                        try:
+                            await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
+                            self.last_video = video_id
+                        except discord.Forbidden as e:
+                            logger.error(f"Forbidden error sending video notification: {e}")
+                            logger.error(f"Channel ID: {channel.id}, Guild ID: {channel.guild.id}")
+                        except Exception as e:
+                            logger.error(f"Error sending video notification: {str(e)}")
                     else:
                         logger.info(f"No notification sent for video {video_id} - already processed")
                         
