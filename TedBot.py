@@ -157,8 +157,17 @@ class GooseBandTracker(commands.Bot):
                     await interaction.followup.send("No videos found in the channel.")
                     return
                 
-                # Select a random video from the larger pool
-                items = playlist_response['items']
+                # Filter out the excluded video
+                excluded_video_id = "QqnjgnHFH70"
+                items = [item for item in playlist_response['items'] 
+                        if item['snippet']['resourceId']['videoId'] != excluded_video_id]
+                
+                if not items:
+                    logger.warning("No videos found after filtering excluded video")
+                    await interaction.followup.send("No videos found in the channel.")
+                    return
+                
+                # Select a random video from the filtered pool
                 random_index = random_module.randint(0, len(items) - 1)
                 random_item = items[random_index]
                 video_id = random_item['snippet']['resourceId']['videoId']
