@@ -104,7 +104,8 @@ class GooseBandTracker(commands.Bot):
             'YOUTUBE_API_KEY',
             'DISCORD_TOKEN',
             'YOUTUBE_CHANNEL_ID',
-            'DISCORD_CHANNEL_ID'
+            'DISCORD_CHANNEL_ID',
+            'DISCORD_RANDOM_CHANNEL_ID'
         ]
         
         missing_vars = [var for var in required_vars if not os.getenv(var)]
@@ -116,8 +117,9 @@ class GooseBandTracker(commands.Bot):
         if not self.youtube_channel_id.startswith('UC'):
             logger.warning(f"Warning: YouTube channel ID '{self.youtube_channel_id}' may be invalid. Channel IDs should start with 'UC'")
         
-        # Set Discord channel ID
-        self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))
+        # Set Discord channel IDs
+        self.discord_channel_id = int(os.getenv('DISCORD_CHANNEL_ID'))  # For notifications
+        self.discord_random_channel_id = int(os.getenv('DISCORD_RANDOM_CHANNEL_ID'))  # For random command
 
     def _init_tracking_vars(self) -> None:
         """Initialize tracking variables"""
@@ -181,6 +183,11 @@ class GooseBandTracker(commands.Bot):
         async def random_youtube(interaction: discord.Interaction) -> None:
             """Get a random video from the channel"""
             try:
+                # Check if command is used in the correct channel
+                if interaction.channel_id != self.discord_random_channel_id:
+                    await interaction.response.send_message(f"This command can only be used in <#{self.discord_random_channel_id}>", ephemeral=True)
+                    return
+
                 # Defer the response since this might take a while
                 await interaction.response.defer()
                 
