@@ -133,7 +133,7 @@ class GooseBandTracker(commands.Bot):
                     return
                 
                 # Select a random video from the larger pool
-                random_item = random.choice(playlist_response['items'])
+                random_item = random.Random().choice(playlist_response['items'])
                 video_id = random_item['snippet']['resourceId']['videoId']
                 published_at = datetime.fromisoformat(random_item['snippet']['publishedAt'].replace('Z', '+00:00'))
                 
@@ -194,7 +194,7 @@ class GooseBandTracker(commands.Bot):
             
         @self.command()
         async def latest(ctx):
-            """Get the latest 5 videos from the channel"""
+            """Get the latest 3 videos from the channel"""
             try:
                 # Get channel uploads playlist ID (cached)
                 uploads_playlist_id = await self.get_uploads_playlist_id()
@@ -250,8 +250,8 @@ class GooseBandTracker(commands.Bot):
                 # Sort videos by publication date (newest first)
                 videos.sort(key=lambda x: x['published_at'], reverse=True)
                 
-                # Take only the 5 most recent videos
-                videos = videos[:5]
+                # Take only the 3 most recent videos
+                videos = videos[:3]
                 
                 if not videos:
                     await ctx.send("No recent videos found (excluding livestreams).")
