@@ -121,10 +121,17 @@ class GooseBandTracker(commands.Bot):
 
     def _init_tracking_vars(self) -> None:
         """Initialize tracking variables"""
+        # Create data directory if it doesn't exist
+        self.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.tracking_file = os.path.join(self.data_dir, 'tracking_vars.json')
+        
+        logger.info(f"Using tracking file: {self.tracking_file}")
+        
         try:
             # Try to load tracking variables from file
-            if os.path.exists('tracking_vars.json'):
-                with open('tracking_vars.json', 'r') as f:
+            if os.path.exists(self.tracking_file):
+                with open(self.tracking_file, 'r') as f:
                     data = json.load(f)
                     self.last_livestream = data.get('last_livestream')
                     self.last_video = data.get('last_video')
@@ -157,11 +164,12 @@ class GooseBandTracker(commands.Bot):
                 'last_short': self.last_short,
                 'last_check_time': self.last_check_time.isoformat() if self.last_check_time else None
             }
-            with open('tracking_vars.json', 'w') as f:
+            with open(self.tracking_file, 'w') as f:
                 json.dump(data, f)
-            logger.info("Saved tracking variables to file")
+            logger.info(f"Saved tracking variables to: {self.tracking_file}")
         except Exception as e:
             logger.error(f"Error saving tracking variables: {e}")
+            logger.error(f"Attempted to save to: {self.tracking_file}")
 
     def _register_commands(self) -> None:
         """Register bot commands"""
