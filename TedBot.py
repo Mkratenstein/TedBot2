@@ -122,36 +122,29 @@ class GooseBandTracker(commands.Bot):
         self.discord_random_channel_id = int(os.getenv('DISCORD_RANDOM_CHANNEL_ID'))  # For random command
 
     def _init_tracking_vars(self) -> None:
-        """Initialize tracking variables"""
-        # Create data directory if it doesn't exist
-        self.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-        os.makedirs(self.data_dir, exist_ok=True)
-        self.tracking_file = os.path.join(self.data_dir, 'tracking_vars.json')
-        
-        logger.info(f"Using tracking file: {self.tracking_file}")
+        """Initialize tracking variables with container-aware path handling"""
+        # Use /app/data in container, local data directory otherwise
+        base_path = '/app/data' if os.path.exists('/app') else 'data'
+        os.makedirs(base_path, exist_ok=True)
+        self.tracking_file = os.path.join(base_path, 'tracking_vars.json')
         
         try:
-            # Try to load tracking variables from file
             if os.path.exists(self.tracking_file):
                 with open(self.tracking_file, 'r') as f:
                     data = json.load(f)
-                    self.last_livestream = data.get('last_livestream')
-                    self.last_video = data.get('last_video')
-                    self.last_short = data.get('last_short')
-                    self.last_check_time = datetime.fromisoformat(data['last_check_time']) if data.get('last_check_time') else None
-                    logger.info("Loaded tracking variables from file")
+                    self.last_video_id = data.get('last_video_id', '')
+                    self.last_livestream_id = data.get('last_livestream_id', '')
+                    self.last_short_id = data.get('last_short_id', '')
             else:
-                self.last_livestream = None
-                self.last_video = None
-                self.last_short = None
-                self.last_check_time = None
-                logger.info("No tracking variables file found, starting fresh")
+                logger.info(f"No tracking variables file found at {self.tracking_file}, starting fresh")
+                self.last_video_id = ''
+                self.last_livestream_id = ''
+                self.last_short_id = ''
         except Exception as e:
             logger.error(f"Error loading tracking variables: {e}")
-            self.last_livestream = None
-            self.last_video = None
-            self.last_short = None
-            self.last_check_time = None
+            self.last_video_id = ''
+            self.last_livestream_id = ''
+            self.last_short_id = ''
         
         self.active_tasks: set = set()
         self.consecutive_errors: int = 0
@@ -161,10 +154,9 @@ class GooseBandTracker(commands.Bot):
         """Save tracking variables to file"""
         try:
             data = {
-                'last_livestream': self.last_livestream,
-                'last_video': self.last_video,
-                'last_short': self.last_short,
-                'last_check_time': self.last_check_time.isoformat() if self.last_check_time else None
+                'last_video_id': self.last_video_id,
+                'last_livestream_id': self.last_livestream_id,
+                'last_short_id': self.last_short_id
             }
             with open(self.tracking_file, 'w') as f:
                 json.dump(data, f)
@@ -282,6 +274,11 @@ class GooseBandTracker(commands.Bot):
         @self.command()
         async def status(ctx: commands.Context) -> None:
             """Check the status of the bot and its services"""
+            # Check if command is used in the correct channel
+            if ctx.channel.id != self.discord_random_channel_id:
+                await ctx.send(f"This command can only be used in <#{self.discord_random_channel_id}>")
+                return
+
             status_message = "🟢 Bot Status:\n"
             status_message += f"- Discord: Connected as {self.user.name}\n"
             status_message += f"- YouTube: {'Connected' if self.youtube else 'Disconnected'}\n"
@@ -378,7 +375,7 @@ class GooseBandTracker(commands.Bot):
             playlist_response = self.youtube.playlistItems().list(
                 part='snippet',
                 playlistId=uploads_playlist_id,
-                maxResults=5
+                maxResults=10  # Increased from 5 to catch more recent videos
             ).execute()
             
             if not playlist_response.get('items'):
@@ -393,8 +390,8 @@ class GooseBandTracker(commands.Bot):
                     
                     logger.info(f"Processing video: {video_id} published at {published_at}")
                     
-                    # Skip if video is too old
-                    if published_at < datetime.now(published_at.tzinfo) - timedelta(hours=24):
+                    # Skip if video is too old (increased to 7 days)
+                    if published_at < datetime.now(published_at.tzinfo) - timedelta(days=7):
                         logger.info(f"Skipping video {video_id} - too old")
                         continue
                         
@@ -414,7 +411,7 @@ class GooseBandTracker(commands.Bot):
                     is_short = video.get('snippet', {}).get('title', '').lower().startswith('#shorts')
                     
                     logger.info(f"Video {video_id} - Livestream: {is_livestream}, Short: {is_short}")
-                    logger.info(f"Last video ID: {self.last_video}, Last short ID: {self.last_short}, Last livestream ID: {self.last_livestream}")
+                    logger.info(f"Last video ID: {self.last_video_id}, Last short ID: {self.last_short_id}, Last livestream ID: {self.last_livestream_id}")
                     
                     channel = self.get_channel(self.discord_channel_id)
                     
@@ -433,13 +430,13 @@ class GooseBandTracker(commands.Bot):
                         logger.error(f"Could not find bot member in guild {channel.guild.name}")
                     
                     # Send notifications for new content
-                    if is_livestream and video_id != self.last_livestream:
+                    if is_livestream and video_id != self.last_livestream_id:
                         logger.info(f"Sending livestream notification for video {video_id}")
                         try:
                             logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
                             message = await channel.send(f"🔴 Goose is LIVE on YouTube!\nhttps://www.youtube.com/watch?v={video_id}")
                             logger.info(f"Successfully sent message with ID: {message.id}")
-                            self.last_livestream = video_id
+                            self.last_livestream_id = video_id
                             self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending livestream notification: {e}")
@@ -454,13 +451,13 @@ class GooseBandTracker(commands.Bot):
                         except Exception as e:
                             logger.error(f"Error sending livestream notification: {str(e)}")
                             logger.error(f"Error type: {type(e).__name__}")
-                    elif is_short and video_id != self.last_short:
+                    elif is_short and video_id != self.last_short_id:
                         logger.info(f"Sending short notification for video {video_id}")
                         try:
                             logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
                             message = await channel.send(f"🎥 New YouTube Short!\nhttps://www.youtube.com/watch?v={video_id}")
                             logger.info(f"Successfully sent message with ID: {message.id}")
-                            self.last_short = video_id
+                            self.last_short_id = video_id
                             self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending short notification: {e}")
@@ -475,13 +472,13 @@ class GooseBandTracker(commands.Bot):
                         except Exception as e:
                             logger.error(f"Error sending short notification: {str(e)}")
                             logger.error(f"Error type: {type(e).__name__}")
-                    elif not is_livestream and not is_short and video_id != self.last_video:
+                    elif not is_livestream and not is_short and video_id != self.last_video_id:
                         logger.info(f"Sending video notification for video {video_id}")
                         try:
                             logger.info(f"Attempting to send message to channel {channel.id} in guild {channel.guild.id}")
                             message = await channel.send(f"🎥 New YouTube Video!\nhttps://www.youtube.com/watch?v={video_id}")
                             logger.info(f"Successfully sent message with ID: {message.id}")
-                            self.last_video = video_id
+                            self.last_video_id = video_id
                             self._save_tracking_vars()  # Save after successful notification
                         except discord.Forbidden as e:
                             logger.error(f"Forbidden error sending video notification: {e}")
